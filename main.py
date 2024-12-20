@@ -1,20 +1,14 @@
-import importlib
-import training
 import sae
-import activation_store
-import config
-import transformer_lens
 import copy
 import torch
-from training import train_sae, train_sae_group, train_sae_group_seperate_wandb
-from sae import VanillaSAE, TopKSAE, BatchTopKSAE, JumpReLUSAE, MatryoshkaSAE, GlobalBatchTopKMatryoshkaSAE
+from training import train_sae_group_seperate_wandb
+from sae import BatchTopKSAE, GlobalBatchTopKMatryoshkaSAE
 from activation_store import ActivationsStore
 from config import get_default_cfg, post_init_cfg
 from transformer_lens import HookedTransformer
 
 
 cfg = get_default_cfg()
-cfg["sae_type"] = sae_type
 cfg["model_name"] = "gemma-2-2b"
 cfg["layer"] = 8
 cfg["site"] = "resid_pre"

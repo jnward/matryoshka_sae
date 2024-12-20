@@ -5,14 +5,6 @@ from sae_lens import SAE
 import wandb
 import json
 import os
-import torch.nn as nn
-import pickle
-import numpy as np
-import pandas as pd
-import warnings
-from IPython.display import display
-from activation_store import ActivationsStore
-from transformer_lens import HookedTransformer
 
 def load_sae_from_wandb(artifact_name, sae_class):
     # Initialize wandb
