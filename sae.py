@@ -120,7 +120,6 @@ class GlobalBatchTopKMatryoshkaSAE(BaseAutoencoder):
 
     def encode(self, x):
         original_shape = x.shape
-        x, _, _ = self.preprocess_input(x)
         x, x_mean, x_std = self.preprocess_input(x)
         self.x_mean = x_mean
         self.x_std = x_std
