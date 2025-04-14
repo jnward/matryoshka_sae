@@ -1,0 +1,4 @@
+numpy>=1.24.0
+torch>=2.0.0
+transformer-lens>=1.0.0
+wandb>=0.15.0

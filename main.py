@@ -1,14 +1,15 @@
-import sae
 import copy
-import torch
+import multiprocessing as mp
 import random
+
 import numpy as np
-from training import train_sae_group_seperate_wandb
-from sae import BatchTopKSAE, GlobalBatchTopKMatryoshkaSAE
+import torch
+from transformer_lens import HookedTransformer  # type: ignore
+
 from activation_store import ActivationsStore
 from config import get_default_cfg, post_init_cfg
-from transformer_lens import HookedTransformer
-import multiprocessing as mp
+from sae import BatchTopKSAE, GlobalBatchTopKMatryoshkaSAE
+from training import train_sae_group_seperate_wandb
 
 
 def set_seed(seed):
@@ -27,17 +28,17 @@ def main():
     cfg["layer"] = 6
     cfg["site"] = "resid_post"
     cfg["dataset_path"] = "Skylion007/openwebtext"
-    cfg["aux_penalty"] = (1/32)
+    cfg["aux_penalty"] = 1 / 32
     cfg["lr"] = 3e-4
     cfg["input_unit_norm"] = False
     # cfg["dict_size"] = 12288
-    cfg['wandb_project'] = 'batch-topk-matryoshka'
-    cfg['l1_coeff'] = 0.
-    cfg['act_size'] = 768
-    cfg['device'] = 'cuda'
-    cfg['bandwidth'] = 0.001
+    cfg["wandb_project"] = "batch-topk-matryoshka"
+    cfg["l1_coeff"] = 0.0
+    cfg["act_size"] = 768
+    cfg["device"] = "cuda"
+    cfg["bandwidth"] = 0.001
     cfg["top_k_matryoshka"] = [10, 10, 10, 10, 10]
-    cfg["group_sizes"] = [768//4, 768 // 4 ,768 // 2, 768, 768*2, 768*4, 768*8]
+    cfg["group_sizes"] = [768 // 4, 768 // 4, 768 // 2, 768, 768 * 2, 768 * 4, 768 * 8]
     cfg["num_tokens"] = 5e6
     cfg["model_batch_size"] = 32
     cfg["model_dtype"] = torch.bfloat16
@@ -54,18 +55,17 @@ def main():
     print(f"Using seed: {cfg['seed']}")
 
     # Train the BatchTopK SAEs
-    dict_sizes = [768, 768*2, 768*4, 768*8, 768*16]
+    dict_sizes = [768, 768 * 2, 768 * 4, 768 * 8, 768 * 16]
     topks = [22, 25, 27, 29, 32]
 
-    model = HookedTransformer.from_pretrained_no_processing(cfg["model_name"]).to(
-        cfg["model_dtype"]).to(cfg["device"])
+    model = HookedTransformer.from_pretrained_no_processing(cfg["model_name"]).to(cfg["model_dtype"]).to(cfg["device"])
     activations_store = ActivationsStore(model, cfg)
     saes = []
     cfgs = []
 
     for i, (dict_size, topk) in enumerate(zip(dict_sizes, topks)):
         cfg_copy = copy.deepcopy(cfg)
-        cfg_copy["sae_type"] = 'batch-topk'
+        cfg_copy["sae_type"] = "batch-topk"
         cfg_copy["dict_size"] = dict_size
         cfg_copy["top_k"] = topk
 
@@ -75,10 +75,10 @@ def main():
         cfgs.append(cfg_copy)
 
     # Train the Matryoshka SAE
-    dict_size = 768*16
+    dict_size = 768 * 16
     topk = 32
     cfg_copy = copy.deepcopy(cfg)
-    cfg_copy["sae_type"] = 'global-matryoshka-topk'
+    cfg_copy["sae_type"] = "global-matryoshka-topk"
     cfg_copy["dict_size"] = dict_size
     cfg_copy["top_k"] = topk
     cfg_copy["group_sizes"] = [dict_size // 16, dict_size // 16, dict_size // 8, dict_size // 4, dict_size // 2]
@@ -87,11 +87,10 @@ def main():
     sae = GlobalBatchTopKMatryoshkaSAE(cfg_copy)
     saes.append(sae)
     cfgs.append(cfg_copy)
-            
+
     train_sae_group_seperate_wandb(saes, activations_store, model, cfgs)
 
 
 if __name__ == "__main__":
     mp.freeze_support()  # Needed for multiprocessing to work with frozen executables
     main()
-

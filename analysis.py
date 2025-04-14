@@ -1,23 +1,25 @@
 # %% Imports
-import torch
-import os
 import json
-from sae import GlobalBatchTopKMatryoshkaSAE
+import os
+
+import torch
+
 from config import post_init_cfg
+from sae import GlobalBatchTopKMatryoshkaSAE
 
 # %% Set up device
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
 # %% Define paths and load configuration
-checkpoint_dir = "checkpoints/gpt2_blocks.6.hook_resid_post_12288_global-matryoshka-topk_32_0.0003_10000"  # Change this to your checkpoint path
+checkpoint_dir = "checkpoints/gpt2_blocks.6.hook_resid_post_12288_global-matryoshka-topk_32_0.0003_10000"  # change this to your checkpoint path
 model_path = os.path.join(checkpoint_dir, "sae.pt")
 config_path = os.path.join(checkpoint_dir, "config.json")
 
 # Load config
 with open(config_path, "r") as f:
     cfg = json.load(f)
-    
+
 print(f"Loaded config from {config_path}")
 
 # %% Initialize and load the SAE
@@ -26,14 +28,16 @@ for k, v in cfg.items():
     if isinstance(v, str) and v.startswith("["):
         try:
             cfg[k] = json.loads(v)
-        except:
+        except Exception as e:
+            print(f"Error converting {k} to list: {e}")
             pass
     elif isinstance(v, str) and v.startswith("torch."):
         try:
-            module_path = v.split('.')
-            if module_path[0] == 'torch':
+            module_path = v.split(".")
+            if module_path[0] == "torch":
                 cfg[k] = getattr(torch, module_path[1])
-        except:
+        except Exception as e:
+            print(f"Error converting {k} to torch: {e}")
             pass
 
 # Update device and finalize config
@@ -44,7 +48,7 @@ cfg = post_init_cfg(cfg)
 sae = GlobalBatchTopKMatryoshkaSAE(cfg)
 sae.load_state_dict(torch.load(model_path, map_location=device))
 sae.eval()
-print(f"SAE model loaded from {model_path}") 
+print(f"SAE model loaded from {model_path}")
 # %%
 sae.W_enc.shape
 

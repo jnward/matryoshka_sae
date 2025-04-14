@@ -1,10 +1,10 @@
-#%%
-import torch
-import torch.nn.functional as F
-from sae_lens import SAE  
-import wandb
+# %%
 import json
 import os
+
+import torch
+import wandb
+
 
 def load_sae_from_wandb(artifact_name, sae_class):
     # Initialize wandb
@@ -24,8 +24,8 @@ def load_sae_from_wandb(artifact_name, sae_class):
         cfg["dtype"] = getattr(torch, cfg["dtype"].split(".")[-1])
 
     # Convert group_sizes back to a list if it's a string
-    if isinstance(cfg['group_sizes'], str):
-        cfg['group_sizes'] = json.loads(cfg['group_sizes'])
+    if isinstance(cfg["group_sizes"], str):
+        cfg["group_sizes"] = json.loads(cfg["group_sizes"])
 
     if isinstance(cfg["top_k_matryoshka"], str):
         cfg["top_k_matryoshka"] = json.loads(cfg["top_k_matryoshka"])
