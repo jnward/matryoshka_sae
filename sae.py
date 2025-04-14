@@ -183,6 +183,10 @@ class GlobalBatchTopKMatryoshkaSAE(BaseAutoencoder):
         max_l2_loss = l2_losses.max()
         mean_l2_loss = total_l2_loss / (len(intermediate_reconstructs) + 1)
 
+        # Calculate FVU (Fraction of Variance Unexplained)
+        x_var = x.float().var()
+        fvu = mean_l2_loss / (x_var + 1e-10)  # Adding small epsilon to avoid division by zero
+        
         l1_norm = all_acts_topk.float().abs().sum(-1).mean()
         l0_norm = (all_acts_topk > 0).float().sum(-1).mean()
         l1_loss = self.config["l1_coeff"] * l1_norm
@@ -204,6 +208,7 @@ class GlobalBatchTopKMatryoshkaSAE(BaseAutoencoder):
             "l1_norm": l1_norm,
             "aux_loss": aux_loss,
             "threshold": self.threshold,
+            "fvu": fvu,  # Add FVU to the output dictionary
         }
         return output
 
@@ -288,17 +293,25 @@ class BatchTopKSAE(BaseAutoencoder):
         return self.postprocess_output(x_reconstruct, self.x_mean, self.x_std)
 
     def get_loss_dict(self, x, x_reconstruct, acts, acts_topk, x_mean, x_std):
+        # Calculate losses
         l2_loss = (x_reconstruct.float() - x.float()).pow(2).mean()
-        l1_norm = acts_topk.float().abs().sum(-1).mean()
+        
+        # Calculate FVU (Fraction of Variance Unexplained)
+        x_var = x.float().var()
+        fvu = l2_loss / (x_var + 1e-10)  # Adding small epsilon to avoid division by zero
+        
+        l1_norm = acts.float().abs().sum(-1).mean()
+        l0_norm = (acts > 0).float().sum(-1).mean()
         l1_loss = self.config["l1_coeff"] * l1_norm
-        l0_norm = (acts_topk > 0).float().sum(-1).mean()
         aux_loss = self.get_auxiliary_loss(x, x_reconstruct, acts)
+        
         loss = l2_loss + l1_loss + aux_loss
-        num_dead_features = (
-            self.num_batches_not_active > self.config["n_batches_to_dead"]
-        ).sum()
+        
+        num_dead_features = (self.num_batches_not_active >= self.config["n_batches_to_dead"]).sum()
+        
         sae_out = self.postprocess_output(x_reconstruct, x_mean, x_std)
-        output = {
+        
+        return {
             "sae_out": sae_out,
             "feature_acts": acts_topk,
             "num_dead_features": num_dead_features,
@@ -309,8 +322,8 @@ class BatchTopKSAE(BaseAutoencoder):
             "l1_norm": l1_norm,
             "aux_loss": aux_loss,
             "threshold": self.threshold,
+            "fvu": fvu,  # Add FVU to the output dictionary
         }
-        return output
 
     def get_auxiliary_loss(self, x, x_reconstruct, acts):
         dead_features = self.num_batches_not_active >= self.config["n_batches_to_dead"]
@@ -377,16 +390,23 @@ class TopKSAE(BaseAutoencoder):
 
     def get_loss_dict(self, x, x_reconstruct, acts, acts_topk, x_mean, x_std):
         l2_loss = (x_reconstruct.float() - x.float()).pow(2).mean()
-        l1_norm = acts_topk.float().abs().sum(-1).mean()
+        
+        # Calculate FVU (Fraction of Variance Unexplained)
+        x_var = x.float().var()
+        fvu = l2_loss / (x_var + 1e-10)  # Adding small epsilon to avoid division by zero
+        
+        l1_norm = acts.float().abs().sum(-1).mean()
+        l0_norm = (acts > 0).float().sum(-1).mean()
         l1_loss = self.config["l1_coeff"] * l1_norm
-        l0_norm = (acts_topk > 0).float().sum(-1).mean()
         aux_loss = self.get_auxiliary_loss(x, x_reconstruct, acts)
+        
         loss = l2_loss + l1_loss + aux_loss
-        num_dead_features = (
-            self.num_batches_not_active > self.config["n_batches_to_dead"]
-        ).sum()
+        
+        num_dead_features = (self.num_batches_not_active > self.config["n_batches_to_dead"]).sum()
+        
         sae_out = self.postprocess_output(x_reconstruct, x_mean, x_std)
-        output = {
+        
+        return {
             "sae_out": sae_out,
             "feature_acts": acts_topk,
             "num_dead_features": num_dead_features,
@@ -396,8 +416,8 @@ class TopKSAE(BaseAutoencoder):
             "l0_norm": l0_norm,
             "l1_norm": l1_norm,
             "aux_loss": aux_loss,
+            "fvu": fvu,  # Add FVU to the output dictionary
         }
-        return output
 
     def get_auxiliary_loss(self, x, x_reconstruct, acts):
         dead_features = self.num_batches_not_active >= self.config["n_batches_to_dead"]
@@ -435,16 +455,22 @@ class VanillaSAE(BaseAutoencoder):
 
     def get_loss_dict(self, x, x_reconstruct, acts, x_mean, x_std):
         l2_loss = (x_reconstruct.float() - x.float()).pow(2).mean()
+        
+        # Calculate FVU (Fraction of Variance Unexplained)
+        x_var = x.float().var() 
+        fvu = l2_loss / (x_var + 1e-10)  # Adding small epsilon to avoid division by zero
+        
         l1_norm = acts.float().abs().sum(-1).mean()
-        l1_loss = self.config["l1_coeff"] * l1_norm
         l0_norm = (acts > 0).float().sum(-1).mean()
+        l1_loss = self.config["l1_coeff"] * l1_norm
+        
         loss = l2_loss + l1_loss
-        num_dead_features = (
-            self.num_batches_not_active > self.config["n_batches_to_dead"]
-        ).sum()
-
+        
+        num_dead_features = (self.num_batches_not_active > self.config["n_batches_to_dead"]).sum()
+        
         sae_out = self.postprocess_output(x_reconstruct, x_mean, x_std)
-        output = {
+        
+        return {
             "sae_out": sae_out,
             "feature_acts": acts,
             "num_dead_features": num_dead_features,
@@ -453,8 +479,8 @@ class VanillaSAE(BaseAutoencoder):
             "l2_loss": l2_loss,
             "l0_norm": l0_norm,
             "l1_norm": l1_norm,
+            "fvu": fvu,  # Add FVU to the output dictionary
         }
-        return output
 
 
 class RectangleFunction(autograd.Function):
@@ -544,19 +570,24 @@ class JumpReLUSAE(BaseAutoencoder):
 
     def get_loss_dict(self, x, x_reconstruct, acts, x_mean, x_std):
         l2_loss = (x_reconstruct.float() - x.float()).pow(2).mean()
-
+        
+        # Calculate FVU (Fraction of Variance Unexplained)
+        x_var = x.float().var()
+        fvu = l2_loss / (x_var + 1e-10)  # Adding small epsilon to avoid division by zero
+        
         l0 = StepFunction.apply(acts, self.jumprelu.log_threshold, 
-                              self.config["bandwidth"]).sum(dim=-1).mean()
+                               self.config["bandwidth"]).sum(dim=-1).mean()
         l0_loss = self.config["l1_coeff"] * l0
         l1_loss = l0_loss
-
+ 
         loss = l2_loss + l1_loss
         num_dead_features = (
             self.num_batches_not_active > self.config["n_batches_to_dead"]
         ).sum()
-
+        
         sae_out = self.postprocess_output(x_reconstruct, x_mean, x_std)
-        output = {
+        
+        return {
             "sae_out": sae_out,
             "feature_acts": acts,
             "num_dead_features": num_dead_features,
@@ -565,5 +596,5 @@ class JumpReLUSAE(BaseAutoencoder):
             "l2_loss": l2_loss,
             "l0_norm": l0,
             "l1_norm": l0,
+            "fvu": fvu,  # Add FVU to the output dictionary
         }
-        return output

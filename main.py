@@ -34,16 +34,17 @@ def main():
     cfg['wandb_project'] = 'batch-topk-matryoshka'
     cfg['l1_coeff'] = 0.
     cfg['act_size'] = 768
-    cfg['device'] = 'mps'
+    cfg['device'] = 'cuda'
     cfg['bandwidth'] = 0.001
     cfg["top_k_matryoshka"] = [10, 10, 10, 10, 10]
     cfg["group_sizes"] = [768//4, 768 // 4 ,768 // 2, 768, 768*2, 768*4, 768*8]
-    cfg["num_tokens"] = 5e8
+    cfg["num_tokens"] = 5e6
     cfg["model_batch_size"] = 32
     cfg["model_dtype"] = torch.bfloat16
     cfg["num_batches_in_buffer"] = 10
     cfg["seq_len"] = 128
-    cfg["seed"] = 42  # Set the seed value
+    cfg["seed"] = 43  # Set the seed value
+    cfg["checkpoint_freq"] = 1000
 
     # Apply post-initialization to set the hook_point and name
     cfg = post_init_cfg(cfg)
