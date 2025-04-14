@@ -99,44 +99,44 @@ def save_checkpoint_mp(sae, cfg, step):
     print(f"Model and config saved at step {step} in {save_dir}")
     return save_dir, sae_path, config_path
 
-def train_sae_group_seperate_wandb(saes, activation_store, model, cfgs):
-    def new_wandb_process(config, log_queue, entity, project):
-        run = wandb.init(
-            entity=entity, 
-            project=project, 
-            config=config, 
-            name=config["name"]
-        )
-        
-        while True:
-            try:
-                # Wait up to 1 second for new data
-                log = log_queue.get(timeout=1)
-                
-                # Check for termination signal
-                if log == "DONE":
-                    break
-                
-                # Check if this is a checkpoint signal
-                if isinstance(log, dict) and log.get("checkpoint"):
-                    # Create and log artifact
-                    artifact = wandb.Artifact(
-                        name=f"{config['name']}_{log['step']}",
-                        type="model",
-                        description=f"Model checkpoint at step {log['step']}",
-                    )
-                    save_dir = log["save_dir"]
-                    artifact.add_file(os.path.join(save_dir, "sae.pt"))
-                    artifact.add_file(os.path.join(save_dir, "config.json"))
-                    run.log_artifact(artifact)
-                else:
-                    # Log regular metrics
-                    wandb.log(log)
-            except Empty:
-                continue
-                
-        wandb.finish()
+def wandb_process_target(config, log_queue, entity, project):
+    run = wandb.init(
+        entity=entity, 
+        project=project, 
+        config=config, 
+        name=config["name"]
+    )
     
+    while True:
+        try:
+            # Wait up to 1 second for new data
+            log = log_queue.get(timeout=1)
+            
+            # Check for termination signal
+            if log == "DONE":
+                break
+            
+            # Check if this is a checkpoint signal
+            if isinstance(log, dict) and log.get("checkpoint"):
+                # Create and log artifact
+                artifact = wandb.Artifact(
+                    name=f"{config['name']}_{log['step']}",
+                    type="model",
+                    description=f"Model checkpoint at step {log['step']}",
+                )
+                save_dir = log["save_dir"]
+                artifact.add_file(os.path.join(save_dir, "sae.pt"))
+                artifact.add_file(os.path.join(save_dir, "config.json"))
+                run.log_artifact(artifact)
+            else:
+                # Log regular metrics
+                wandb.log(log)
+        except Empty:
+            continue
+            
+    wandb.finish()
+
+def train_sae_group_seperate_wandb(saes, activation_store, model, cfgs):
     num_batches = int(cfgs[0]["num_tokens"] // cfgs[0]["batch_size"])
     print(f"Number of batches: {num_batches}")
     optimizers = [torch.optim.Adam(sae.parameters(), lr=cfg["lr"], betas=(cfg["beta1"], cfg["beta2"])) 
@@ -152,12 +152,11 @@ def train_sae_group_seperate_wandb(saes, activation_store, model, cfgs):
         log_queues.append(log_queue)
         wandb_config = cfg
         wandb_process = mp.Process(
-            target=new_wandb_process,
+            target=wandb_process_target,
             args=(wandb_config, log_queue, cfg.get("wandb_entity", ""), cfg["wandb_project"]),
         )
         wandb_process.start()
         wandb_processes.append(wandb_process)
-
 
     for i in pbar:
         batch = activation_store.next_batch()

@@ -3,6 +3,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from transformer_lens.hook_points import HookedRootModule
 from datasets import Dataset, load_dataset
 import tqdm
+import transformer_lens.utils as utils
 
 class ActivationsStore:
     def __init__(
@@ -13,14 +14,24 @@ class ActivationsStore:
         self.model = model
         self.dataset = iter(load_dataset(cfg["dataset_path"], split="train", 
                                          streaming=True, trust_remote_code=True))
-        self.hook_point = cfg["hook_point"]
-        self.context_size = min(cfg["seq_len"], model.cfg.n_ctx)
-        self.model_batch_size = cfg["model_batch_size"]
-        self.device = cfg["device"]
-        self.num_batches_in_buffer = cfg["num_batches_in_buffer"]
+        
+        # Use the TransformerLens utility to properly construct the hook point name
+        layer = cfg.get("layer", 0)
+        site = cfg.get("site", "resid_post")
+        self.hook_point = utils.get_act_name(site, layer)
+        
+        self.context_size = min(cfg.get("seq_len", 1024), model.cfg.n_ctx)
+        self.model_batch_size = cfg.get("model_batch_size", 8)
+        self.device = cfg.get("device", "cpu")
+        self.num_batches_in_buffer = cfg.get("num_batches_in_buffer", 10)
         self.tokens_column = self._get_tokens_column()
         self.config = cfg
         self.tokenizer = model.tokenizer
+        
+        # Initialize activation buffer and dataloader iterator
+        self.activation_buffer = self._fill_buffer()
+        self.dataloader = self._get_dataloader()
+        self.dataloader_iter = iter(self.dataloader)
 
     def _get_tokens_column(self):
         sample = next(self.dataset)

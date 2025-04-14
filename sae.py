@@ -11,7 +11,7 @@ class BaseAutoencoder(nn.Module):
         super().__init__()
 
         self.config = cfg
-        torch.manual_seed(self.config["seed"])
+        self._set_seed()
 
         self.b_dec = nn.Parameter(torch.zeros(self.config["act_size"]))
         self.b_enc = nn.Parameter(torch.zeros(self.config["dict_size"]))
@@ -32,6 +32,12 @@ class BaseAutoencoder(nn.Module):
         )
 
         self.to(cfg["dtype"]).to(cfg["device"])
+
+    def _set_seed(self):
+        """Set the PyTorch seed from config"""
+        if "seed" in self.config:
+            torch.manual_seed(self.config["seed"])
+            print(f"SAE initialized with seed: {self.config['seed']}")
 
     def preprocess_input(self, x):
         if self.config["input_unit_norm"]:
@@ -67,8 +73,11 @@ class BaseAutoencoder(nn.Module):
 
 class GlobalBatchTopKMatryoshkaSAE(BaseAutoencoder):
     def __init__(self, cfg):
-        super().__init__(cfg)
+        # Don't call super().__init__(cfg) as we want to override weight initialization
+        super(BaseAutoencoder, self).__init__()  # Only initialize nn.Module
 
+        self.config = cfg
+        
         total_dict_size = sum(cfg["group_sizes"])
         self.group_sizes = cfg["group_sizes"]
         
@@ -77,6 +86,9 @@ class GlobalBatchTopKMatryoshkaSAE(BaseAutoencoder):
 
         self.b_dec = nn.Parameter(torch.zeros(self.config["act_size"]))
         self.b_enc = nn.Parameter(torch.zeros(total_dict_size))
+        
+        # Set seed before initializing weights
+        self._set_seed()
         
         self.W_enc = nn.Parameter(
             torch.nn.init.kaiming_uniform_(
@@ -230,6 +242,7 @@ class GlobalBatchTopKMatryoshkaSAE(BaseAutoencoder):
 
 class BatchTopKSAE(BaseAutoencoder):
     def __init__(self, cfg):
+        # The BatchTopKSAE class uses the parent's weight initialization, so it's fine to call super().__init__
         super().__init__(cfg)
         self.register_buffer('threshold', torch.tensor(0.0))
         
