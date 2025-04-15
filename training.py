@@ -28,18 +28,21 @@ def main() -> None:
     cfg["input_unit_norm"] = False
     cfg["l1_coeff"] = 0.0
     cfg["act_size"] = 768
-    cfg["group_sizes"] = [1536 // 4, 1536 // 4, 1536 // 2, 1536, 1536 * 2, 1536 * 4, 1536 * 8]
-    cfg["num_tokens"] = int(2e8)  # Ensure num_tokens is an integer
+    cfg["num_tokens"] = int(1e6)  # Ensure num_tokens is an integer
     cfg["model_dtype"] = torch.bfloat16
     cfg["checkpoint_freq"] = 10000
+
+    largest_dict_size = 2**14
+    group_size_multipliers = [1 / 16, 1 / 16, 1 / 8, 1 / 4, 1 / 2]
+    cfg["group_sizes"] = [int(largest_dict_size * multiplier) for multiplier in group_size_multipliers]
 
     # Update synthetic data parameters
     cfg["signal_to_noise_ratio"] = 10.0  # Clean signals
     # New synthetic data parameters
     cfg["non_euclidean"] = 0.0  # Keep data in Euclidean space
-    cfg["superposition_multiplier"] = 1.5  # n_features = act_size * superposition_multiplier
-    cfg["non_orthogonal"] = 0.3  # Somewhat orthogonal signals
-    cfg["hierarchical"] = 0.2  # Slight hierarchical structure
+    cfg["superposition_multiplier"] = 1  # n_features = act_size * superposition_multiplier
+    cfg["non_orthogonal"] = 0  # Somewhat orthogonal signals, 0 is fully orthogonal
+    cfg["hierarchical"] = 0  # Slight hierarchical structure, 0 is no hierarchical structure
 
     # Set the seed for reproducibility
     set_seed(cfg["seed"])
@@ -54,12 +57,10 @@ def main() -> None:
     saes: List[Union[BatchTopKSAE, GlobalBatchTopKMatryoshkaSAE]] = []
     cfgs = []
 
-    # Train the BatchTopK SAEs
-    dict_sizes = [1536, 1536 * 2, 1536 * 4, 1536 * 8, 1536 * 16]
     topks = [22, 25, 27, 29, 32]
 
     # Initialize the BatchTopK SAEs
-    for dict_size, topk in zip(dict_sizes, topks):
+    for dict_size, topk in zip(cfg["group_sizes"], topks):
         cfg_copy = copy.deepcopy(cfg)
         cfg_copy["sae_type"] = "batch-topk"
         cfg_copy["dict_size"] = dict_size
@@ -71,13 +72,12 @@ def main() -> None:
         cfgs.append(cfg_copy)
 
     # Initialize the Matryoshka SAE
-    dict_size = dict_sizes[-1]
+    dict_size = largest_dict_size
     topk = topks[-1]
     cfg_copy = copy.deepcopy(cfg)
     cfg_copy["sae_type"] = "global-matryoshka-topk"
     cfg_copy["dict_size"] = dict_size
     cfg_copy["top_k"] = topk
-    cfg_copy["group_sizes"] = [dict_size // 16, dict_size // 16, dict_size // 8, dict_size // 4, dict_size // 2]
 
     cfg_copy = post_init_cfg(cfg_copy)
     sae_matryoshka = GlobalBatchTopKMatryoshkaSAE(cfg_copy)

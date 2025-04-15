@@ -30,7 +30,6 @@ class BaseAutoencoder(nn.Module):
         """Set the PyTorch seed from config"""
         if "seed" in self.config:
             torch.manual_seed(self.config["seed"])
-            print(f"SAE initialized with seed: {self.config['seed']}")
 
     def preprocess_input(self, x):
         if self.config["input_unit_norm"]:

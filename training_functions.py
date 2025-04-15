@@ -61,7 +61,7 @@ def train_sae_group(
 
             if (i % cfg["checkpoint_freq"] == 0) and (i != 0):
                 # Save checkpoint
-                save_checkpoint_mp(sae, cfg, i, checkpoint_dir="custom_data_checkpoints")
+                save_checkpoint_mp(sae, cfg, i)
 
             pbar.set_postfix(
                 {
@@ -80,4 +80,4 @@ def train_sae_group(
 
     # Final checkpoints
     for idx, (sae, cfg) in enumerate(zip(saes, cfgs)):
-        save_checkpoint_mp(sae, cfg, i, checkpoint_dir="custom_data_checkpoints")
+        save_checkpoint_mp(sae, cfg, i)

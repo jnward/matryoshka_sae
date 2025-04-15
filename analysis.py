@@ -28,6 +28,7 @@ def get_normalized_weights(sae: torch.nn.Module, use_decoder: bool = True) -> to
         weights = sae.W_dec.data
     else:
         weights = sae.W_enc.data
+    # Normalize the weights
     return weights / torch.norm(weights, dim=1, keepdim=True)
 
 
@@ -48,6 +49,23 @@ def run_hungarian_alignment(
     # Convert to numpy
     weights_1_np = weights_1.cpu().numpy()
     weights_2_np = weights_2.cpu().numpy()
+
+    # For decoder weights, features are along dim 0
+    # For encoder weights, features are along dim 1
+    # We want to compare features along the same dimension
+    if weights_1_np.shape[0] != weights_2_np.shape[0]:
+        # If the first dimensions don't match, we need to transpose
+        if weights_1_np.shape[0] == weights_2_np.shape[1]:
+            weights_2_np = weights_2_np.T
+        elif weights_1_np.shape[1] == weights_2_np.shape[0]:
+            weights_1_np = weights_1_np.T
+        else:
+            raise ValueError(f"Cannot align weight matrices with shapes {weights_1_np.shape} and {weights_2_np.shape}")
+
+    # Ensure we're comparing the same number of features
+    min_features = min(weights_1_np.shape[0], weights_2_np.shape[0])
+    weights_1_np = weights_1_np[:min_features]
+    weights_2_np = weights_2_np[:min_features]
 
     # Compute cost matrix (negative cosine similarity)
     cost_matrix = -np.dot(weights_1_np, weights_2_np.T)
@@ -214,36 +232,38 @@ def plot_alignment_comparison(
         opacity=0.6,
         marginal_x="histogram",
         marginal_y="histogram",
-        range_x=[0, 1],
-        range_y=[0, 1],
-        size_max=3,
+        range_x=[-0.05, 1.05],
+        range_y=[-0.05, 1.05],
+        size_max=8,
     )
 
-    # Update the scatter points separately to make them even smaller
-    fig.update_traces(marker=dict(size=2), selector=dict(mode="markers"))
+    # Update the scatter points separately to make them more visible
+    fig.update_traces(marker=dict(size=5), selector=dict(mode="markers"))
 
     # Contour parameters
     contour_params = dict(showscale=False, ncontours=8, line_width=1, contours=dict(showlabels=False, coloring="lines"))
 
     # Add contour for "Equal" points
-    fig.add_trace(
-        go.Histogram2dContour(
-            x=df_equal["Decoder alignment"],
-            y=df_equal["Encoder alignment"],
-            opacity=0.7,
-            **contour_params,
+    if not df_equal.empty:
+        fig.add_trace(
+            go.Histogram2dContour(
+                x=df_equal["Decoder alignment"],
+                y=df_equal["Encoder alignment"],
+                opacity=0.7,
+                **contour_params,
+            )
         )
-    )
 
     # Add contour for "Different" points
-    fig.add_trace(
-        go.Histogram2dContour(
-            x=df_different["Decoder alignment"],
-            y=df_different["Encoder alignment"],
-            opacity=0.7,
-            **contour_params,
+    if not df_different.empty:
+        fig.add_trace(
+            go.Histogram2dContour(
+                x=df_different["Decoder alignment"],
+                y=df_different["Encoder alignment"],
+                opacity=0.7,
+                **contour_params,
+            )
         )
-    )
 
     # Update layout
     fig.update_layout(
@@ -252,6 +272,9 @@ def plot_alignment_comparison(
         yaxis_title="Encoder alignment",
         legend=dict(yanchor="top", y=0.99, xanchor="right", x=1.00, bgcolor="rgba(255, 255, 255, 0.8)"),
         yaxis=dict(scaleanchor="x", scaleratio=1),
+        width=800,
+        height=800,
+        margin=dict(l=50, r=50, t=50, b=50),
     )
 
     return fig
@@ -262,41 +285,47 @@ def main() -> None:
     try:
         # change the below
         save_file_name = "alignment_comparison"
-        plot_title = "Gemma 2B SAE Alignment Comparison (Same model)"
-        model_1_checkpoint_dir = (
-            "custom_data_checkpoints/gemma-2-2B_blocks.12.hook_resid_post_3200_global-matryoshka-topk_40_0.0003_42_243"
-        )
-        model_2_checkpoint_dir = (
-            "custom_data_checkpoints/gemma-2-2B_blocks.12.hook_resid_post_3200_global-matryoshka-topk_40_0.0003_42_0"
-        )
+        plot_title = "SAE Alignment Comparison (Global vs Batch TopK)"
+        model_1_checkpoint_dir = "checkpoints/global-matryoshka-topk_16384_32_0.0003_42_243"
+        model_2_checkpoint_dir = "checkpoints/global-matryoshka-topk_16384_32_0.0003_95_243"
 
         # Set up device
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        # Example paths - replace with your actual checkpoint paths
-        checkpoint_dir_1 = model_1_checkpoint_dir
-        checkpoint_dir_2 = model_2_checkpoint_dir
-
         # Load models
-        print(f"Loading model from {checkpoint_dir_1}")
-        sae_1, cfg_1 = load_sae_model(checkpoint_dir_1, str(device))
-        print(f"Loading model from {checkpoint_dir_2}")
-        sae_2, cfg_2 = load_sae_model(checkpoint_dir_2, str(device))
+        print(f"Loading model from {model_1_checkpoint_dir}")
+        sae_1, cfg_1 = load_sae_model(model_1_checkpoint_dir, str(device))
+        print(f"Loading model from {model_2_checkpoint_dir}")
+        sae_2, cfg_2 = load_sae_model(model_2_checkpoint_dir, str(device))
+
+        # Get the minimum number of features between the two models
+        n_features_1 = sae_1.W_dec.shape[0]
+        n_features_2 = sae_2.W_dec.shape[0]
+        min_features = min(n_features_1, n_features_2)
+        print(f"n_features_1: {n_features_1}")
+        print(f"n_features_2: {n_features_2}")
+        print(f"min_features: {min_features}")
+
+        # Set indices to compare only the features that exist in both models
+        start_idx = 0
+        end_idx = min_features
+
+        print(f"Comparing first {min_features} features (out of {n_features_1} and {n_features_2} features)")
 
         # Create comparison plot
-        fig = plot_alignment_comparison(sae_1, sae_2, title=plot_title)
+        fig = plot_alignment_comparison(sae_1, sae_2, start_idx=start_idx, end_idx=end_idx, title=plot_title)
 
         # Create directories if they don't exist
-        os.makedirs("custom_data_html", exist_ok=True)
-        os.makedirs("custom_data_png", exist_ok=True)
+        os.makedirs("plots_html", exist_ok=True)
+        os.makedirs("plots_png", exist_ok=True)
 
         # Save as HTML (interactive)
-        html_path = os.path.join("custom_data_html", f"{save_file_name}.html")
+        html_path = os.path.join("plots_html", f"{save_file_name}.html")
         print(f"Saving HTML to {html_path}")
         fig.write_html(html_path)
 
         # Save as PNG (static)
-        png_path = os.path.join("custom_data_png", f"{save_file_name}.png")
+        png_path = os.path.join("plots_png", f"{save_file_name}.png")
         print(f"Saving PNG to {png_path}")
         fig.write_image(png_path)
     except Exception as e:

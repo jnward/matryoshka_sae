@@ -3,7 +3,7 @@ import torch
 
 def get_default_cfg():
     default_cfg = {
-        "seed": 42,
+        "seed": 95,
         "batch_size": 4096,
         "lr": 3e-4,
         "num_tokens": int(1e6),
