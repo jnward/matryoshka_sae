@@ -93,12 +93,12 @@ def train_sae_group(saes, activation_store, model, cfgs):
         save_checkpoint(wandb_run, sae, cfg, i)
 
 
-def save_checkpoint_mp(sae, cfg, step):
+def save_checkpoint_mp(sae, cfg, step, checkpoint_dir="checkpoints"):
     """
     Save checkpoint without requiring a wandb run object.
     Creates an artifact but doesn't log it to wandb directly.
     """
-    save_dir = f"checkpoints/{cfg['name']}_{step}"
+    save_dir = f"{checkpoint_dir}/{cfg['name']}_{step}"
     os.makedirs(save_dir, exist_ok=True)
 
     # Save model state
@@ -198,7 +198,7 @@ def train_sae_group_seperate_wandb(saes, activation_store, model, cfgs):
 
             if i % cfg["checkpoint_freq"] == 0:
                 # Save checkpoint and send artifact info to wandb process
-                save_dir, _, _ = save_checkpoint_mp(sae, cfg, i)
+                save_dir, _, _ = save_checkpoint_mp(sae, cfg, i, checkpoint_dir="custom_data_checkpoints")
                 log_queues[idx].put({"checkpoint": True, "step": i, "save_dir": save_dir})
 
             pbar.set_postfix(
@@ -218,7 +218,7 @@ def train_sae_group_seperate_wandb(saes, activation_store, model, cfgs):
 
     # Final checkpoints
     for idx, (sae, cfg) in enumerate(zip(saes, cfgs)):
-        save_dir, _, _ = save_checkpoint_mp(sae, cfg, i)
+        save_dir, _, _ = save_checkpoint_mp(sae, cfg, i, checkpoint_dir="custom_data_checkpoints")
         log_queues[idx].put({"checkpoint": True, "step": i, "save_dir": save_dir})
 
     # Clean up wandb processes

@@ -33,10 +33,11 @@ def set_seed(seed):
 
 def main():
     cfg = get_default_cfg()
-    cfg["model_name"] = "gemma-2-2b"
+    cfg["model_name"] = "gpt2-small"
     cfg["layer"] = 14
     cfg["site"] = "resid_post"
     cfg["dataset_path"] = "Skylion007/openwebtext"
+    cfg["dataset_config"] = "default"
     cfg["aux_penalty"] = 1 / 32
     cfg["lr"] = 3e-4
     cfg["input_unit_norm"] = False

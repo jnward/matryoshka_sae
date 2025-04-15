@@ -12,7 +12,15 @@ class ActivationsStore:
         cfg: dict,
     ):
         self.model = model
-        self.dataset = iter(load_dataset(cfg["dataset_path"], split="train", streaming=True, trust_remote_code=True))
+        self.dataset = iter(
+            load_dataset(
+                cfg["dataset_path"],
+                cfg.get("dataset_config", "default"),
+                split="train",
+                streaming=True,
+                trust_remote_code=True,
+            )
+        )
 
         # Use the TransformerLens utility to properly construct the hook point name
         layer = cfg.get("layer", 0)
