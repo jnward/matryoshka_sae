@@ -67,21 +67,34 @@ def generate_synthetic_data(
     signal_strength: float,
     noise_level: float,
     seed: int,
+    # New parameters in [0,1] to control the data properties:
+    non_euclidean: float,  # 0: Euclidean; 1: fully warped
+    superposition: float,  # 0: nearly one signal per sample; 1: full superposition
+    non_orthogonal: float,  # 0: fully orthogonal signals; 1: as generated (non-orthogonal)
+    hierarchical: float,  # 0: independent signals; 1: signals grouped in clusters
 ) -> torch.Tensor:
     """
-    Generate synthetic data with signal and noise components.
+    Generate synthetic data with control over several characteristics.
 
     Args:
-        n_samples: Number of samples to generate
-        activation_size: Size of each activation vector
-        n_signals: Number of signal components
-        signal_strength: Strength of signal components
-        noise_level: Level of noise in the data
-        seed: Random seed for reproducibility
+        n_samples: Number of samples to generate.
+        activation_size: Size of each activation vector.
+        n_signals: Number of signal components.
+        signal_strength: Strength of signal components.
+        noise_level: Noise level added to the data.
+        seed: Random seed for reproducibility.
+        non_euclidean: Fraction (0 to 1) controlling the degree of non-linear warping.
+        superposition: Fraction (0 to 1) controlling how many signals are active per sample.
+        non_orthogonal: Fraction (0 to 1) controlling the deviation from an orthogonal basis.
+                        0 means the signals are forced to be fully orthogonal (if possible),
+                        1 uses the generated signals as-is.
+        hierarchical: Fraction (0 to 1) controlling the degree of hierarchical structure.
+                        0 yields independent signals; 1 forces signals to come from a few clusters.
 
     Returns:
-        Generated data tensor of shape (n_samples, activation_size)
+        A data tensor of shape (n_samples, activation_size)
     """
+    # Validate basic parameters
     if n_samples <= 0:
         raise ValueError("n_samples must be positive")
     if activation_size <= 0:
@@ -93,23 +106,87 @@ def generate_synthetic_data(
     if noise_level < 0:
         raise ValueError("noise_level must be non-negative")
 
-    # Convert n_samples to integer if it's a float
-    n_samples = int(n_samples)
+    for param_name, param_value in [
+        ("non_euclidean", non_euclidean),
+        ("superposition", superposition),
+        ("non_orthogonal", non_orthogonal),
+        ("hierarchical", hierarchical),
+    ]:
+        if not (0.0 <= param_value <= 1.0):
+            raise ValueError(f"{param_name} must be between 0 and 1")
 
+    # Set random seeds
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
 
-    # Generate random signal directions
-    signals = torch.randn(n_signals, activation_size)
-    signals = signals / torch.norm(signals, dim=1, keepdim=True)
+    # Step 1: Generate base random signals and normalize
+    random_signals = torch.randn(n_signals, activation_size)
+    random_signals = random_signals / random_signals.norm(dim=1, keepdim=True)
 
-    # Generate random signal coefficients
+    # Step 2: Introduce hierarchical structure if requested
+    if hierarchical > 0:
+        n_clusters = max(1, int(n_signals * hierarchical))
+        # Generate cluster centers (normalized)
+        cluster_centers = torch.randn(n_clusters, activation_size)
+        cluster_centers = cluster_centers / cluster_centers.norm(dim=1, keepdim=True)
+        hierarchical_signals = []
+        # For each signal, assign a cluster and add a small noise offset
+        for _ in range(n_signals):
+            cluster_idx = random.randint(0, n_clusters - 1)
+            # You can adjust noise_scale to control how tightly each signal adheres to its cluster center
+            noise_scale = 0.1
+            sig = cluster_centers[cluster_idx] + torch.randn(activation_size) * noise_scale
+            norm = sig.norm()
+            sig = sig if norm == 0 else sig / norm
+            hierarchical_signals.append(sig)
+        stacked_signals = torch.stack(hierarchical_signals)
+        # Interpolate between independent signals and the hierarchical version
+        signals = (1 - hierarchical) * random_signals + hierarchical * stacked_signals
+        signals = signals / signals.norm(dim=1, keepdim=True)
+    else:
+        signals = random_signals
+
+    # Step 3: Control non-orthogonality.
+    # If non_orthogonal < 1, we interpolate signals with an orthogonalized version.
+    if non_orthogonal < 1.0:
+        if n_signals <= activation_size:
+            # Compute a QR decomposition (orthogonalization)
+            # Note: torch.linalg.qr is preferred if available.
+            q, _ = torch.linalg.qr(signals)
+            orthogonal_signals = q
+        else:
+            # If you have more signals than the dimension, full orthogonalization is impossible.
+            orthogonal_signals = signals
+        # Interpolate between the original and the orthogonal signals.
+        signals = (non_orthogonal * signals) + ((1 - non_orthogonal) * orthogonal_signals)
+        signals = signals / signals.norm(dim=1, keepdim=True)
+
+    # Step 4: Create coefficient matrix.
+    # Each sample gets a coefficient per signal, modulated by signal_strength.
     coeffs = torch.randn(n_samples, n_signals) * signal_strength
 
-    # Generate data
-    data = torch.matmul(coeffs, signals)  # Signal component
-    data += torch.randn(n_samples, activation_size) * noise_level  # Noise component
+    # Control superposition: if superposition < 1, allow only a subset of signals
+    if superposition < 1.0:
+        # Create a mask with probability 'superposition' for each signal in each sample
+        mask = (torch.rand(n_samples, n_signals) < superposition).float()
+        # If a sample has no active signal, force one to be active
+        for i in range(n_samples):
+            if mask[i].sum() == 0:
+                idx = random.randint(0, n_signals - 1)
+                mask[i, idx] = 1.0
+        coeffs = coeffs * mask
+
+    # Step 5: Compute the data from the linear combination of signals.
+    data = torch.matmul(coeffs, signals)
+
+    # Step 6: Add noise component.
+    data += torch.randn(n_samples, activation_size) * noise_level
+
+    # Step 7: Apply a non-Euclidean transform if requested.
+    # Here we warp the data by mixing in a sine nonlinearity.
+    if non_euclidean > 0:
+        data = (1 - non_euclidean) * data + non_euclidean * torch.sin(data)
 
     return data
 
@@ -118,16 +195,40 @@ def load_synthetic_data(cfg: Dict[str, Any]) -> tuple[CustomDataLoader, int]:
     """
     Generate synthetic data and load it using CustomDataLoader.
 
-    Args:
-        cfg: Configuration dictionary containing data generation parameters
+    Expected cfg keys include:
+        - "num_tokens": Number of samples.
+        - "act_size": Activation size (feature dimension).
+        - "n_signals": Number of signal components.
+        - "signal_strength": The strength to scale the signal contribution.
+        - "noise_level": The noise level to add.
+        - "seed": Random seed.
+        - "batch_size": Batch size for the data loader.
+        - "device": Device on which the data should be placed.
+        - (Optionally) "non_euclidean", "superposition", "non_orthogonal", "hierarchical" in [0,1]
 
     Returns:
-        Tuple of (data_loader, activation_size)
+        Tuple of (CustomDataLoader, activation_size)
     """
-    required_params = ["num_tokens", "act_size", "n_signals", "signal_strength", "noise_level", "seed"]
+    # Validate required parameters.
+    required_params = [
+        "num_tokens",
+        "act_size",
+        "n_signals",
+        "signal_strength",
+        "noise_level",
+        "seed",
+        "batch_size",
+        "device",
+    ]
     for param in required_params:
         if param not in cfg:
             raise ValueError(f"Missing required config parameter: {param}")
+
+    # Extract or default additional parameters controlling the new effects.
+    non_euclidean = cfg.get("non_euclidean", 0.0)
+    superposition = cfg.get("superposition", 1.0)
+    non_orthogonal = cfg.get("non_orthogonal", 1.0)
+    hierarchical = cfg.get("hierarchical", 0.0)
 
     data = generate_synthetic_data(
         n_samples=cfg["num_tokens"],
@@ -136,6 +237,10 @@ def load_synthetic_data(cfg: Dict[str, Any]) -> tuple[CustomDataLoader, int]:
         signal_strength=cfg["signal_strength"],
         noise_level=cfg["noise_level"],
         seed=cfg["seed"],
+        non_euclidean=non_euclidean,
+        superposition=superposition,
+        non_orthogonal=non_orthogonal,
+        hierarchical=hierarchical,
     )
     data_loader = CustomDataLoader(data, cfg)
     return data_loader, cfg["act_size"]

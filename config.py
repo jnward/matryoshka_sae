@@ -6,7 +6,7 @@ def get_default_cfg():
         "seed": 42,
         "batch_size": 4096,
         "lr": 3e-4,
-        "num_tokens": int(1e8),
+        "num_tokens": int(1e6),
         "l1_coeff": 0,
         "beta1": 0.9,
         "beta2": 0.99,
@@ -26,6 +26,11 @@ def get_default_cfg():
         "n_signals": 10,
         "signal_strength": 1.0,
         "noise_level": 0.1,
+        # Precisely control synthetic data parameters
+        "non_euclidean": 0.0,  # 0: Euclidean; 1: fully warped
+        "superposition": 0.0,  # 0: nearly one signal per sample; 1: full superposition
+        "non_orthogonal": 0.0,  # 0: fully orthogonal signals; 1: as generated (non-orthogonal)
+        "hierarchical": 0.0,  # 0: independent signals; 1: signals grouped in clusters
     }
 
     return default_cfg

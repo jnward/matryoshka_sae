@@ -29,7 +29,7 @@ def main() -> None:
     cfg["l1_coeff"] = 0.0
     cfg["act_size"] = 768
     cfg["group_sizes"] = [1536 // 4, 1536 // 4, 1536 // 2, 1536, 1536 * 2, 1536 * 4, 1536 * 8]
-    cfg["num_tokens"] = 2e8
+    cfg["num_tokens"] = int(2e8)  # Ensure num_tokens is an integer
     cfg["model_dtype"] = torch.bfloat16
     cfg["checkpoint_freq"] = 10000
 
@@ -37,6 +37,11 @@ def main() -> None:
     cfg["n_signals"] = 10
     cfg["signal_strength"] = 1.0
     cfg["noise_level"] = 0.1
+    # New synthetic data parameters
+    cfg["non_euclidean"] = 0.0  # Keep data in Euclidean space
+    cfg["superposition"] = 0.5  # Moderate superposition of signals
+    cfg["non_orthogonal"] = 0.3  # Somewhat orthogonal signals
+    cfg["hierarchical"] = 0.2  # Slight hierarchical structure
 
     # Set the seed for reproducibility
     set_seed(cfg["seed"])
