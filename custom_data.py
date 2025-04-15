@@ -93,6 +93,9 @@ def generate_synthetic_data(
     if noise_level < 0:
         raise ValueError("noise_level must be non-negative")
 
+    # Convert n_samples to integer if it's a float
+    n_samples = int(n_samples)
+
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)

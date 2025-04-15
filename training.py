@@ -38,8 +38,6 @@ def main() -> None:
     cfg["signal_strength"] = 1.0
     cfg["noise_level"] = 0.1
 
-    cfg = post_init_cfg(cfg)
-
     # Set the seed for reproducibility
     set_seed(cfg["seed"])
     print(f"Using seed: {cfg['seed']}")

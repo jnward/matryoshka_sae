@@ -1,5 +1,4 @@
 import torch
-import transformer_lens.utils as utils  # type: ignore
 
 
 def get_default_cfg():
@@ -28,14 +27,10 @@ def get_default_cfg():
         "signal_strength": 1.0,
         "noise_level": 0.1,
     }
-    default_cfg = post_init_cfg(default_cfg)
+
     return default_cfg
 
 
 def post_init_cfg(cfg):
-    cfg["hook_point"] = utils.get_act_name(cfg["site"], cfg["layer"])
-    cfg["name"] = (
-        f"{cfg['model_name']}_{cfg['hook_point']}_{cfg['dict_size']}_"
-        f"{cfg['sae_type']}_{cfg['top_k']}_{cfg['lr']}_{cfg['seed']}"
-    )
+    cfg["name"] = f"{cfg['sae_type']}_{cfg['dict_size']}_{cfg['top_k']}_{cfg['lr']}_{cfg['seed']}"
     return cfg

@@ -34,7 +34,6 @@ def get_normalized_weights(sae: torch.nn.Module, use_decoder: bool = True) -> to
 def run_hungarian_alignment(
     weights_1: torch.Tensor,
     weights_2: torch.Tensor,
-    batch_dim: int = 4096,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, float, np.ndarray]:
     """
     Run Hungarian algorithm to align features between two SAEs.
@@ -42,7 +41,6 @@ def run_hungarian_alignment(
     Args:
         weights_1: First set of weights
         weights_2: Second set of weights
-        batch_dim: Batch dimension for processing
 
     Returns:
         Tuple of (cost_matrix, row_ind, col_ind, avg_score, similarities)
@@ -179,10 +177,10 @@ def plot_alignment_comparison(
 
     # Run Hungarian alignment
     dec_cost_matrix, dec_row_ind, dec_col_ind, dec_avg_score, dec_similarities = run_hungarian_alignment(
-        decoder_1, decoder_2, hungarian_batch_dim
+        decoder_1, decoder_2
     )
     enc_cost_matrix, enc_row_ind, enc_col_ind, enc_avg_score, enc_similarities = run_hungarian_alignment(
-        encoder_1, encoder_2, hungarian_batch_dim
+        encoder_1, encoder_2
     )
 
     # Ensure we're comparing the same number of features
