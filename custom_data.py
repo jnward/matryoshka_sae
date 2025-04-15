@@ -61,12 +61,12 @@ class CustomDataLoader:
 
 
 def generate_synthetic_data(
-    n_samples: int = 10000,
-    activation_size: int = 512,
-    n_signals: int = 10,
-    signal_strength: float = 1.0,
-    noise_level: float = 0.1,
-    seed: int = 42,
+    n_samples: int,
+    activation_size: int,
+    n_signals: int,
+    signal_strength: float,
+    noise_level: float,
+    seed: int,
 ) -> torch.Tensor:
     """
     Generate synthetic data with signal and noise components.
@@ -121,40 +121,18 @@ def load_synthetic_data(cfg: Dict[str, Any]) -> tuple[CustomDataLoader, int]:
     Returns:
         Tuple of (data_loader, activation_size)
     """
-    required_params = ["n_samples", "activation_size", "n_signals", "signal_strength", "noise_level", "seed"]
+    required_params = ["num_tokens", "act_size", "n_signals", "signal_strength", "noise_level", "seed"]
     for param in required_params:
         if param not in cfg:
             raise ValueError(f"Missing required config parameter: {param}")
 
     data = generate_synthetic_data(
-        n_samples=cfg["n_samples"],
-        activation_size=cfg["activation_size"],
+        n_samples=cfg["num_tokens"],
+        activation_size=cfg["act_size"],
         n_signals=cfg["n_signals"],
         signal_strength=cfg["signal_strength"],
         noise_level=cfg["noise_level"],
         seed=cfg["seed"],
     )
     data_loader = CustomDataLoader(data, cfg)
-    return data_loader, cfg["activation_size"]
-
-
-if __name__ == "__main__":
-    # Example usage
-    cfg = {
-        "n_samples": 10000,
-        "activation_size": 512,
-        "n_signals": 10,
-        "signal_strength": 1.0,
-        "noise_level": 0.1,
-        "seed": 42,
-        "batch_size": 32,
-        "device": "cuda" if torch.cuda.is_available() else "cpu",
-    }
-
-    data_loader, act_size = load_synthetic_data(cfg)
-
-    # Test the data loader
-    batch = data_loader.next_batch()
-    print(f"Batch shape: {batch.shape}")
-    print(f"Batch mean: {batch.mean():.4f}")
-    print(f"Batch std: {batch.std():.4f}")
+    return data_loader, cfg["act_size"]

@@ -5,6 +5,7 @@ from typing import List, Union
 import torch
 import tqdm  # type: ignore
 
+from custom_data import CustomDataLoader
 from sae import BatchTopKSAE, GlobalBatchTopKMatryoshkaSAE
 
 
@@ -41,7 +42,7 @@ def save_checkpoint_mp(
 
 
 def train_sae_group(
-    saes: List[Union[BatchTopKSAE, GlobalBatchTopKMatryoshkaSAE]], activation_store: any, cfgs: List[dict]
+    saes: List[Union[BatchTopKSAE, GlobalBatchTopKMatryoshkaSAE]], activation_store: CustomDataLoader, cfgs: List[dict]
 ) -> None:
     num_batches = int(cfgs[0]["num_tokens"] // cfgs[0]["batch_size"])
     print(f"Number of batches: {num_batches}")
@@ -58,7 +59,7 @@ def train_sae_group(
             sae_output = sae(batch)
             loss = sae_output["loss"]
 
-            if i % cfg["checkpoint_freq"] == 0:
+            if (i % cfg["checkpoint_freq"] == 0) and (i != 0):
                 # Save checkpoint
                 save_checkpoint_mp(sae, cfg, i, checkpoint_dir="custom_data_checkpoints")
 
