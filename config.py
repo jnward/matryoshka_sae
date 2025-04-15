@@ -23,12 +23,9 @@ def get_default_cfg():
         "top_k_aux": 512,
         "aux_penalty": (1 / 32),
         # Synthetic data parameters
-        "n_signals": 10,
-        "signal_strength": 1.0,
-        "noise_level": 0.1,
-        # Precisely control synthetic data parameters
+        "signal_to_noise_ratio": 10.0,  # Signal-to-noise ratio: higher means cleaner signals
         "non_euclidean": 0.0,  # 0: Euclidean; 1: fully warped
-        "superposition": 0.0,  # 0: nearly one signal per sample; 1: full superposition
+        "superposition_multiplier": 1.0,  # Controls #signals: n_signals = activation_size * superposition_multiplier
         "non_orthogonal": 0.0,  # 0: fully orthogonal signals; 1: as generated (non-orthogonal)
         "hierarchical": 0.0,  # 0: independent signals; 1: signals grouped in clusters
     }

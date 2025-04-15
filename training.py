@@ -34,12 +34,10 @@ def main() -> None:
     cfg["checkpoint_freq"] = 10000
 
     # Update synthetic data parameters
-    cfg["n_signals"] = 10
-    cfg["signal_strength"] = 1.0
-    cfg["noise_level"] = 0.1
+    cfg["signal_to_noise_ratio"] = 10.0  # Clean signals
     # New synthetic data parameters
     cfg["non_euclidean"] = 0.0  # Keep data in Euclidean space
-    cfg["superposition"] = 0.5  # Moderate superposition of signals
+    cfg["superposition_multiplier"] = 1.5  # n_features = act_size * superposition_multiplier
     cfg["non_orthogonal"] = 0.3  # Somewhat orthogonal signals
     cfg["hierarchical"] = 0.2  # Slight hierarchical structure
 
