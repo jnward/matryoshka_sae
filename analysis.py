@@ -11,15 +11,21 @@ print(f"Using device: {device}")
 
 # %% Define paths and load configuration
 # checkpoint_dir_42 = "original_checkpoints/gpt2_blocks.6.hook_resid_post_12288_global-matryoshka-topk_32_0.0003_42_48827"  # Change this to your checkpoint path
-n_features = 768
-k = 22
+# checkpoint_dir_42 = "checkpoints/gemma-2-2b_blocks.14.hook_resid_post_24576_batch-topk_32_0.0003_42_48827"
+# checkpoint_dir_42 = "checkpoints/gemma-2-2b_blocks.14.hook_resid_post_24576_global-matryoshka-topk_32_0.0003_42_48827"
 
-checkpoint_dir_42 = f"original_checkpoints/gpt2_blocks.6.hook_resid_post_{n_features}_batch-topk_{k}_0.0003_42_48827"  # Change this to your checkpoint path
+n_features = 24576
+k = 32
+
+checkpoint_dir_42 = f"checkpoints/gemma-2-2b_blocks.14.hook_resid_post_{n_features}_batch-topk_{k}_0.0003_42_48827"  # Change this to your checkpoint path
+# checkpoint_dir_42 = f"original_checkpoints/gpt2_blocks.6.hook_resid_post_{n_features}_batch-topk_{k}_0.0003_42_48827"  # Change this to your checkpoint path
 model_path_42 = os.path.join(checkpoint_dir_42, "sae.pt")
 config_path_42 = os.path.join(checkpoint_dir_42, "config.json")
 
-# checkpoint_dir_43 = "original_checkpoints/gpt2_blocks.6.hook_resid_post_12288_global-matryoshka-topk_32_0.0003_43_48827"  # Change this to your checkpoint path
-checkpoint_dir_43 = f"original_checkpoints/gpt2_blocks.6.hook_resid_post_{n_features}_batch-topk_{k}_0.0003_43_48827"  # Change this to your checkpoint path
+# checkpoint_dir_43 = "checkpoints/gemma-2-2b_blocks.14.hook_resid_post_24576_batch-topk_32_0.0003_43_48827"
+# checkpoint_dir_43 = "checkpoints/gemma-2-2b_blocks.14.hook_resid_post_24576_global-matryoshka-topk_32_0.0003_43_48827"
+# checkpoint_dir_43 = f"original_checkpoints/gpt2_blocks.6.hook_resid_post_{n_features}_batch-topk_{k}_0.0003_43_48827"  # Change this to your checkpoint path
+checkpoint_dir_43 = f"checkpoints/gemma-2-2b_blocks.14.hook_resid_post_{n_features}_batch-topk_{k}_0.0003_43_48827"
 model_path_43 = os.path.join(checkpoint_dir_43, "sae.pt")
 config_path_43 = os.path.join(checkpoint_dir_43, "config.json")
 
@@ -72,187 +78,9 @@ print(f"SAE model loaded from {model_path_42}")
 sae_43 = BatchTopKSAE(cfg_43)
 sae_43.load_state_dict(torch.load(model_path_43, map_location=device))
 sae_43.eval()
-print(f"SAE model loaded from {model_path_43}") 
-# %%
-from transformer_lens import HookedTransformer
-from activation_store import ActivationsStore
-
-model = HookedTransformer.from_pretrained_no_processing(cfg_42["model_name"]).to(
-    cfg_42["model_dtype"]).to(cfg_42["device"])
-activations_store = ActivationsStore(model, cfg_42)
+print(f"SAE model loaded from {model_path_43}")
 
 # %%
-test_acts = activations_store.next_batch()
-
-# %%
-out_42 = sae_42(test_acts)
-recon_42 = out_42['sae_out']
-features_42 = out_42['feature_acts']
-
-mse = torch.nn.functional.mse_loss(recon_42, test_acts)
-mse
-
-e = recon_42 - test_acts
-total_var = torch.var(test_acts)
-fvu = torch.var(e) / total_var
-print(f"FVU: {fvu}")
-
-(features_42 > 0).sum(dim=-1).float().mean()
-
-# %%
-
-sub_W_enc = sae_42.W_enc#[:, sae_42.group_indices[2]:sae_42.group_indices[3]]
-sub_b_enc = sae_42.b_enc#[sae_42.group_indices[2]:sae_42.group_indices[3]]
-sub_W_dec = sae_42.W_dec#[sae_42.group_indices[2]:sae_42.group_indices[3], :]
-sub_b_dec = sae_42.b_dec
-
-print(sub_W_enc.shape, sub_b_enc.shape, sub_W_dec.shape, sub_b_dec.shape)
-
-sub_features = test_acts.float() @ sub_W_enc + sub_b_enc
-sub_features[sub_features <= sae_42.threshold] = 0
-print(sub_features.shape)
-sub_features
-
-sub_recon = sub_features @ sub_W_dec + sub_b_dec
-e = sub_recon - test_acts
-total_var = torch.var(test_acts)
-fvu = torch.var(e) / total_var
-print(f"FVU: {fvu}")
-
-# make sure the full SAE works w/ this code ^
-
-# %%
-sub_W_enc.sum(dim=0).abs().mean()
-
-# (test_features[0, 0] > 1).sum()
-# %%
-from hungarian import run_hungarian_alignment, get_normalized_weights
-
-decoder_42 = get_normalized_weights(sae_42)
-decoder_43 = get_normalized_weights(sae_43)
-
-encoder_42 = get_normalized_weights(sae_42, use_decoder=False)
-encoder_43 = get_normalized_weights(sae_43, use_decoder=False)
-
-decoder_42 = decoder_42[:768]
-decoder_43 = decoder_43[:768]
-
-encoder_42 = encoder_42[:768]
-encoder_43 = encoder_43[:768]
-
-dec_cost_matrix, dec_row_ind, dec_col_ind, dec_avg_score, dec_similarities = run_hungarian_alignment(decoder_42, decoder_43, 4096)
-enc_cost_matrix, enc_row_ind, enc_col_ind, enc_avg_score, enc_similarities = run_hungarian_alignment(encoder_42, encoder_43, 4096)
-# %%
-dec_similarities.shape
-# %%
-import plotly.express as px
-import numpy as np
-
-fig = px.histogram(
-    dec_similarities,
-    nbins=100,
-    range_x=[0, 1],
-    # log_x=True,
-    title="Decoder Similarities (log scale)"
-)
-fig.show()
-
-# Keep the second histogram as is
-fig = px.histogram(
-    enc_similarities,
-    nbins=100,
-    range_x=[0, 1],
-    title="Encoder Similarities"
-)
-fig.show()
-# %%
-identical = (enc_col_ind == dec_col_ind)
-
-# %%
-import plotly.express as px
-import plotly.graph_objects as go
-import pandas as pd
-import numpy as np
-
-# Create dataframe for the scatter plot
-df = pd.DataFrame({
-    'Decoder alignment': dec_similarities,
-    'Encoder alignment': enc_similarities,
-    'Category': ['Equal' if i else 'Different' for i in identical]
-})
-
-# Split data by category
-df_equal = df[df['Category'] == 'Equal']
-df_different = df[df['Category'] == 'Different']
-
-# Create figure with secondary y-axis
-fig = px.scatter(
-    df, 
-    x='Decoder alignment', 
-    y='Encoder alignment',
-    color='Category',
-    color_discrete_map={'Different': 'orange', 'Equal': 'blue'},
-    opacity=0.6,
-    marginal_x='histogram',
-    marginal_y='histogram',
-    range_x=[0, 1],
-    range_y=[0, 1],
-    size_max=3  # Make points smaller
-)
-
-# Update the scatter points separately to make them even smaller
-fig.update_traces(marker=dict(size=2), selector=dict(mode='markers'))
-
-# Add contours for better visibility of density
-contour_params = dict(
-    showscale=False,
-    ncontours=8,
-    line_width=1,
-    contours=dict(
-        showlabels=False,
-        coloring='lines'
-    )
-)
-
-# Add contour for "Equal" points
-fig.add_trace(go.Histogram2dContour(
-    x=df_equal['Decoder alignment'],
-    y=df_equal['Encoder alignment'],
-    # colorscale='Blues',
-    opacity=0.7,
-    **contour_params
-))
-
-# Add contour for "Different" points
-fig.add_trace(go.Histogram2dContour(
-    x=df_different['Decoder alignment'],
-    y=df_different['Encoder alignment'],
-    # colorscale='Oranges',
-    opacity=0.7,
-    **contour_params
-))
-
-# Update layout
-fig.update_layout(
-    xaxis_title="Decoder alignment",
-    yaxis_title="Encoder alignment",
-    legend=dict(
-        yanchor="top",
-        y=0.99,
-        xanchor="right",
-        x=1.00,
-        bgcolor='rgba(255, 255, 255, 0.8)'
-    ),
-    yaxis=dict(
-        scaleanchor="x",
-        scaleratio=1
-    )
-)
-
-fig.show()
-
-# %%
-
 def plot_alignment_comparison(sae_1, sae_2, start_idx=0, end_idx=768, hungarian_batch_dim=4096):
     """
     Create a scatter plot comparing decoder and encoder alignments for a slice of features.
@@ -346,14 +174,15 @@ def plot_alignment_comparison(sae_1, sae_2, start_idx=0, end_idx=768, hungarian_
 
     # Update layout
     fig.update_layout(
-        title=f"Alignment Comparison (features {start_idx}-{end_idx})",
+        title=f"BatchTopK Seed Alignment ({n_features} features)",
+        # title=f"Matryoshka Seed Alignment\n(features {start_idx}-{end_idx})",
         xaxis_title="Decoder alignment",
         yaxis_title="Encoder alignment",
         legend=dict(
             yanchor="top",
             y=0.99,
             xanchor="right",
-            x=1.00,
+            x=1.1,
             bgcolor='rgba(255, 255, 255, 0.8)'
         ),
         yaxis=dict(
@@ -361,15 +190,80 @@ def plot_alignment_comparison(sae_1, sae_2, start_idx=0, end_idx=768, hungarian_
             scaleratio=1
         )
     )
-    
-    return fig
+    mean_decoder_alignment = df['Decoder alignment'].mean()
+    return fig, mean_decoder_alignment
 
 
 # # Features 0-768
-fig = plot_alignment_comparison(sae_42, sae_43, start_idx=0, end_idx=768)
+fig, mean_alignment = plot_alignment_comparison(sae_42, sae_43, start_idx=0, end_idx=-1)
 fig.show()
+print(f"Mean alignment: {mean_alignment}")
 
 # Features 768-1536
 # fig = plot_alignment_comparison(sae_42, sae_43, start_idx=3072, end_idx=6144)
 # fig.show()
 # %%
+mean_alignments = []
+for group_idx in range(6):
+    start_idx = 0
+    end_idx = 2**(group_idx) * 768
+    fig, mean_alignment = plot_alignment_comparison(sae_42, sae_43, start_idx=start_idx, end_idx=end_idx)
+    fig.show()
+    mean_alignments.append(mean_alignment)
+# %%
+import plotly.express as px
+px.line(mean_alignments, x=range(6), y=mean_alignments, title="Mean Alignment by Group")
+# %%
+matryoshka_mean_alignments = [0.63246906, 0.58439595, 0.55029696, 0.5238667, 0.49258527]
+batch_topk_mean_alignments = [0.79798245, 0.78008759, 0.75952810, 0.7231605, 0.62281191]
+
+# %% Plot alignment comparison with doubling group sizes
+import plotly.graph_objects as go
+
+# Define x-axis labels (doubling each time)
+group_sizes = [1536, 3072, 6144, 12288, 24576]
+x_labels = [f"{size}" for size in group_sizes]  # Double each size for x-axis labels
+
+# Create the figure
+fig = go.Figure()
+
+# Add line for matryoshka
+fig.add_trace(go.Scatter(
+    x=x_labels,
+    y=matryoshka_mean_alignments,
+    mode='lines+markers',
+    name='Matryoshka',
+    line=dict(color='blue', width=2),
+    marker=dict(size=8)
+))
+
+# Add line for batch_topk
+fig.add_trace(go.Scatter(
+    x=x_labels,
+    y=batch_topk_mean_alignments,
+    mode='lines+markers',
+    name='BatchTopK',
+    line=dict(color='red', width=2),
+    marker=dict(size=8)
+))
+
+# Update layout
+fig.update_layout(
+    title="Decoder Alignment Comparison by Dictionary Size",
+    xaxis_title="Dictionary/Group Size",
+    yaxis_title="Average Alignment Score",
+    legend=dict(
+        yanchor="top",
+        y=0.99,
+        xanchor="right",
+        x=0.99,
+        bgcolor='rgba(255, 255, 255, 0.8)'
+    ),
+    yaxis=dict(
+        range=[0, 1]
+    )
+)
+
+fig.show()
+# %%
+
