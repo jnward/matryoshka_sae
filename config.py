@@ -1,5 +1,5 @@
 import torch
-import transformer_lens.utils as utils
+import transformer_lens.utils as utils  # type: ignore
 
 
 def get_default_cfg():
@@ -14,17 +14,11 @@ def get_default_cfg():
         "max_grad_norm": 100000,
         "seq_len": 128,
         "dtype": torch.float32,
-        "model_dtype": torch.float32,
-        "model_name": "gemma-2-2B",
-        "site": "resid_pre",
-        "layer": 12,
         "act_size": 4096,
         "dict_size": 12288,
         "device": "cuda:0",
         "model_batch_size": 512,
         "num_batches_in_buffer": 10,
-        "dataset_path": "Skylion007/openwebtext",
-        "wandb_project": "sparse_autoencoders",
         "input_unit_norm": True,
         "perf_log_freq": 1000,
         "sae_type": "topk",
@@ -34,8 +28,6 @@ def get_default_cfg():
         "top_k": 32,
         "top_k_aux": 512,
         "aux_penalty": (1 / 32),
-        # for jumprelu
-        "bandwidth": 0.001,
     }
     default_cfg = post_init_cfg(default_cfg)
     return default_cfg

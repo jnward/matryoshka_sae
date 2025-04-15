@@ -1,257 +1,143 @@
-# %% Imports
 import json
 import os
+from typing import Optional, Tuple, Union
 
+import numpy as np
+import pandas as pd  # type: ignore
+import plotly.express as px  # type: ignore
+import plotly.graph_objects as go  # type: ignore
 import torch
+from scipy.optimize import linear_sum_assignment  # type: ignore
 
 from config import post_init_cfg
 from sae import BatchTopKSAE, GlobalBatchTopKMatryoshkaSAE
 
-# %% Set up device
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(f"Using device: {device}")
 
-# %% Define paths and load configuration
-# checkpoint_dir_42 = "original_checkpoints/gpt2_blocks.6.hook_resid_post_12288_global-matryoshka-topk_32_0.0003_42_48827"  # Change this to your checkpoint path
-n_features = 768
-k = 22
+def get_normalized_weights(sae: torch.nn.Module, use_decoder: bool = True) -> torch.Tensor:
+    """
+    Get normalized weights from an SAE model.
 
-checkpoint_dir_42 = f"original_checkpoints/gpt2_blocks.6.hook_resid_post_{n_features}_batch-topk_{k}_0.0003_42_48827"  # Change this to your checkpoint path
-model_path_42 = os.path.join(checkpoint_dir_42, "sae.pt")
-config_path_42 = os.path.join(checkpoint_dir_42, "config.json")
+    Args:
+        sae: The SAE model
+        use_decoder: If True, use decoder weights, otherwise use encoder weights
 
-# checkpoint_dir_43 = "original_checkpoints/gpt2_blocks.6.hook_resid_post_12288_global-matryoshka-topk_32_0.0003_43_48827"  # Change this to your checkpoint path
-checkpoint_dir_43 = f"original_checkpoints/gpt2_blocks.6.hook_resid_post_{n_features}_batch-topk_{k}_0.0003_43_48827"  # Change this to your checkpoint path
-model_path_43 = os.path.join(checkpoint_dir_43, "sae.pt")
-config_path_43 = os.path.join(checkpoint_dir_43, "config.json")
-
-# Load config
-with open(config_path_42, "r") as f:
-    cfg_42 = json.load(f)
-
-with open(config_path_43, "r") as f:
-    cfg_43 = json.load(f)
-
-print(f"Loaded config from {config_path_42}")
-print(f"Loaded config from {config_path_43}")
+    Returns:
+        Normalized weights tensor
+    """
+    if use_decoder:
+        weights = sae.W_dec.data
+    else:
+        weights = sae.W_enc.data
+    return weights / torch.norm(weights, dim=1, keepdim=True)
 
 
-# %% Initialize and load the SAE
-# Convert string representations back to lists if needed
-def process_config(cfg):
-    for k, v in cfg.items():
-        if isinstance(v, str) and v.startswith("["):
-            try:
-                cfg[k] = json.loads(v)
-            except:
-                pass
-        elif isinstance(v, str) and v.startswith("torch."):
-            try:
-                module_path = v.split(".")
-                if module_path[0] == "torch":
-                    cfg[k] = getattr(torch, module_path[1])
-            except:
-                pass
+def run_hungarian_alignment(
+    weights_1: torch.Tensor,
+    weights_2: torch.Tensor,
+    batch_dim: int = 4096,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, float, np.ndarray]:
+    """
+    Run Hungarian algorithm to align features between two SAEs.
+
+    Args:
+        weights_1: First set of weights
+        weights_2: Second set of weights
+        batch_dim: Batch dimension for processing
+
+    Returns:
+        Tuple of (cost_matrix, row_ind, col_ind, avg_score, similarities)
+    """
+    # Convert to numpy
+    weights_1_np = weights_1.cpu().numpy()
+    weights_2_np = weights_2.cpu().numpy()
+
+    # Compute cost matrix (negative cosine similarity)
+    cost_matrix = -np.dot(weights_1_np, weights_2_np.T)
+
+    # Run Hungarian algorithm
+    row_ind, col_ind = linear_sum_assignment(cost_matrix)
+
+    # Compute similarities
+    similarities = -cost_matrix[row_ind, col_ind]
+    avg_score = np.mean(similarities)
+
+    return cost_matrix, row_ind, col_ind, avg_score, similarities
 
 
-process_config(cfg_42)
-process_config(cfg_43)
+def load_sae_model(checkpoint_dir: str, device: str) -> Tuple[Union[BatchTopKSAE, GlobalBatchTopKMatryoshkaSAE], dict]:
+    """
+    Load an SAE model and its configuration from a checkpoint directory.
 
-# Update device and finalize config
-cfg_42["device"] = device
-cfg_42 = post_init_cfg(cfg_42)
-# cfg_42["n_features"] = n_features
+    Args:
+        checkpoint_dir: Path to the checkpoint directory
+        device: Device to load the model onto
 
-cfg_43["device"] = device
-cfg_43 = post_init_cfg(cfg_43)
-# cfg_43["n_features"] = n_features
+    Returns:
+        Tuple of (model, config)
 
-# Create and load SAE model
-# sae_42 = GlobalBatchTopKMatryoshkaSAE(cfg_42)
-sae_42 = BatchTopKSAE(cfg_42)
-sae_42.load_state_dict(torch.load(model_path_42, map_location=device))
-sae_42.eval()
-print(f"SAE model loaded from {model_path_42}")
+    Raises:
+        FileNotFoundError: If checkpoint files are missing
+        ValueError: If config is invalid
+        RuntimeError: If model loading fails
+    """
+    model_path = os.path.join(checkpoint_dir, "sae.pt")
+    config_path = os.path.join(checkpoint_dir, "config.json")
 
-# sae_43 = GlobalBatchTopKMatryoshkaSAE(cfg_43)
-sae_43 = BatchTopKSAE(cfg_43)
-sae_43.load_state_dict(torch.load(model_path_43, map_location=device))
-sae_43.eval()
-print(f"SAE model loaded from {model_path_43}")
-# %%
-from transformer_lens import HookedTransformer
+    if not os.path.exists(checkpoint_dir):
+        raise FileNotFoundError(f"Checkpoint directory not found: {checkpoint_dir}")
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(f"Model file not found: {model_path}")
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"Config file not found: {config_path}")
 
-from activation_store import ActivationsStore
+    try:
+        # Load config
+        with open(config_path, "r") as f:
+            cfg = json.load(f)
 
-model = (
-    HookedTransformer.from_pretrained_no_processing(cfg_42["model_name"]).to(cfg_42["model_dtype"]).to(cfg_42["device"])
-)
-activations_store = ActivationsStore(model, cfg_42)
+        # Process config (convert string representations to proper types)
+        for k, v in cfg.items():
+            if isinstance(v, str) and v.startswith("["):
+                try:
+                    cfg[k] = json.loads(v)
+                except json.JSONDecodeError:
+                    pass
+            elif isinstance(v, str) and v.startswith("torch."):
+                try:
+                    module_path = v.split(".")
+                    if module_path[0] == "torch":
+                        cfg[k] = getattr(torch, module_path[1])
+                except (AttributeError, IndexError):
+                    pass
 
-# %%
-test_acts = activations_store.next_batch()
+        # Update device and finalize config
+        cfg["device"] = device
+        cfg = post_init_cfg(cfg)
 
-# %%
-out_42 = sae_42(test_acts)
-recon_42 = out_42["sae_out"]
-features_42 = out_42["feature_acts"]
+        # Create and load SAE model
+        sae: Union[BatchTopKSAE, GlobalBatchTopKMatryoshkaSAE]
+        if cfg["sae_type"] == "global-matryoshka-topk":
+            sae = GlobalBatchTopKMatryoshkaSAE(cfg)
+        else:
+            sae = BatchTopKSAE(cfg)
 
-mse = torch.nn.functional.mse_loss(recon_42, test_acts)
-mse
+        sae.load_state_dict(torch.load(model_path, map_location=device))
+        sae.eval()
+        print(f"SAE model loaded from {model_path}")
 
-e = recon_42 - test_acts
-total_var = torch.var(test_acts)
-fvu = torch.var(e) / total_var
-print(f"FVU: {fvu}")
-
-(features_42 > 0).sum(dim=-1).float().mean()
-
-# %%
-
-sub_W_enc = sae_42.W_enc  # [:, sae_42.group_indices[2]:sae_42.group_indices[3]]
-sub_b_enc = sae_42.b_enc  # [sae_42.group_indices[2]:sae_42.group_indices[3]]
-sub_W_dec = sae_42.W_dec  # [sae_42.group_indices[2]:sae_42.group_indices[3], :]
-sub_b_dec = sae_42.b_dec
-
-print(sub_W_enc.shape, sub_b_enc.shape, sub_W_dec.shape, sub_b_dec.shape)
-
-sub_features = test_acts.float() @ sub_W_enc + sub_b_enc
-sub_features[sub_features <= sae_42.threshold] = 0
-print(sub_features.shape)
-sub_features
-
-sub_recon = sub_features @ sub_W_dec + sub_b_dec
-e = sub_recon - test_acts
-total_var = torch.var(test_acts)
-fvu = torch.var(e) / total_var
-print(f"FVU: {fvu}")
-
-# make sure the full SAE works w/ this code ^
-
-# %%
-sub_W_enc.sum(dim=0).abs().mean()
-
-# (test_features[0, 0] > 1).sum()
-# %%
-from hungarian import get_normalized_weights, run_hungarian_alignment
-
-decoder_42 = get_normalized_weights(sae_42)
-decoder_43 = get_normalized_weights(sae_43)
-
-encoder_42 = get_normalized_weights(sae_42, use_decoder=False)
-encoder_43 = get_normalized_weights(sae_43, use_decoder=False)
-
-decoder_42 = decoder_42[:768]
-decoder_43 = decoder_43[:768]
-
-encoder_42 = encoder_42[:768]
-encoder_43 = encoder_43[:768]
-
-dec_cost_matrix, dec_row_ind, dec_col_ind, dec_avg_score, dec_similarities = run_hungarian_alignment(
-    decoder_42, decoder_43, 4096
-)
-enc_cost_matrix, enc_row_ind, enc_col_ind, enc_avg_score, enc_similarities = run_hungarian_alignment(
-    encoder_42, encoder_43, 4096
-)
-# %%
-dec_similarities.shape
-import numpy as np
-
-# %%
-import plotly.express as px
-
-fig = px.histogram(
-    dec_similarities,
-    nbins=100,
-    range_x=[0, 1],
-    # log_x=True,
-    title="Decoder Similarities (log scale)",
-)
-fig.show()
-
-# Keep the second histogram as is
-fig = px.histogram(enc_similarities, nbins=100, range_x=[0, 1], title="Encoder Similarities")
-fig.show()
-# %%
-identical = enc_col_ind == dec_col_ind
-
-import numpy as np
-import pandas as pd
-
-# %%
-import plotly.express as px
-import plotly.graph_objects as go
-
-# Create dataframe for the scatter plot
-df = pd.DataFrame(
-    {
-        "Decoder alignment": dec_similarities,
-        "Encoder alignment": enc_similarities,
-        "Category": ["Equal" if i else "Different" for i in identical],
-    }
-)
-
-# Split data by category
-df_equal = df[df["Category"] == "Equal"]
-df_different = df[df["Category"] == "Different"]
-
-# Create figure with secondary y-axis
-fig = px.scatter(
-    df,
-    x="Decoder alignment",
-    y="Encoder alignment",
-    color="Category",
-    color_discrete_map={"Different": "orange", "Equal": "blue"},
-    opacity=0.6,
-    marginal_x="histogram",
-    marginal_y="histogram",
-    range_x=[0, 1],
-    range_y=[0, 1],
-    size_max=3,  # Make points smaller
-)
-
-# Update the scatter points separately to make them even smaller
-fig.update_traces(marker=dict(size=2), selector=dict(mode="markers"))
-
-# Add contours for better visibility of density
-contour_params = dict(showscale=False, ncontours=8, line_width=1, contours=dict(showlabels=False, coloring="lines"))
-
-# Add contour for "Equal" points
-fig.add_trace(
-    go.Histogram2dContour(
-        x=df_equal["Decoder alignment"],
-        y=df_equal["Encoder alignment"],
-        # colorscale='Blues',
-        opacity=0.7,
-        **contour_params,
-    )
-)
-
-# Add contour for "Different" points
-fig.add_trace(
-    go.Histogram2dContour(
-        x=df_different["Decoder alignment"],
-        y=df_different["Encoder alignment"],
-        # colorscale='Oranges',
-        opacity=0.7,
-        **contour_params,
-    )
-)
-
-# Update layout
-fig.update_layout(
-    xaxis_title="Decoder alignment",
-    yaxis_title="Encoder alignment",
-    legend=dict(yanchor="top", y=0.99, xanchor="right", x=1.00, bgcolor="rgba(255, 255, 255, 0.8)"),
-    yaxis=dict(scaleanchor="x", scaleratio=1),
-)
-
-fig.show()
-
-# %%
+        return sae, cfg
+    except Exception as e:
+        raise RuntimeError(f"Failed to load model from {checkpoint_dir}: {str(e)}")
 
 
-def plot_alignment_comparison(sae_1, sae_2, start_idx=0, end_idx=768, hungarian_batch_dim=4096):
+def plot_alignment_comparison(
+    sae_1: torch.nn.Module,
+    sae_2: torch.nn.Module,
+    start_idx: int = 0,
+    end_idx: Optional[int] = None,
+    hungarian_batch_dim: int = 4096,
+    title: Optional[str] = None,
+) -> go.Figure:
     """
     Create a scatter plot comparing decoder and encoder alignments for a slice of features.
 
@@ -259,23 +145,37 @@ def plot_alignment_comparison(sae_1, sae_2, start_idx=0, end_idx=768, hungarian_
         sae_1: First SAE model
         sae_2: Second SAE model
         start_idx: Starting index for feature slice
-        end_idx: Ending index for feature slice
+        end_idx: Ending index for feature slice (if None, uses all features)
         hungarian_batch_dim: Dimension for Hungarian alignment
+        title: Optional title for the plot
 
     Returns:
         Plotly figure object
+
+    Raises:
+        ValueError: If input parameters are invalid
     """
-    import pandas as pd
-    import plotly.express as px
-    import plotly.graph_objects as go
-    from hungarian import get_normalized_weights, run_hungarian_alignment
+    if not isinstance(sae_1, torch.nn.Module) or not isinstance(sae_2, torch.nn.Module):
+        raise ValueError("sae_1 and sae_2 must be torch.nn.Module instances")
+    if start_idx < 0:
+        raise ValueError("start_idx must be non-negative")
+    if end_idx is not None and end_idx <= start_idx:
+        raise ValueError("end_idx must be greater than start_idx")
+    if hungarian_batch_dim <= 0:
+        raise ValueError("hungarian_batch_dim must be positive")
 
-    # Get normalized weights and slice them
-    decoder_1 = get_normalized_weights(sae_1)[start_idx:end_idx]
-    decoder_2 = get_normalized_weights(sae_2)[start_idx:end_idx]
+    # Get normalized weights
+    decoder_1 = get_normalized_weights(sae_1)
+    decoder_2 = get_normalized_weights(sae_2)
+    encoder_1 = get_normalized_weights(sae_1, use_decoder=False)
+    encoder_2 = get_normalized_weights(sae_2, use_decoder=False)
 
-    encoder_1 = get_normalized_weights(sae_1, use_decoder=False)[start_idx:end_idx]
-    encoder_2 = get_normalized_weights(sae_2, use_decoder=False)[start_idx:end_idx]
+    # Slice if end_idx is specified
+    if end_idx is not None:
+        decoder_1 = decoder_1[start_idx:end_idx]
+        decoder_2 = decoder_2[start_idx:end_idx]
+        encoder_1 = encoder_1[start_idx:end_idx]
+        encoder_2 = encoder_2[start_idx:end_idx]
 
     # Run Hungarian alignment
     dec_cost_matrix, dec_row_ind, dec_col_ind, dec_avg_score, dec_similarities = run_hungarian_alignment(
@@ -285,14 +185,19 @@ def plot_alignment_comparison(sae_1, sae_2, start_idx=0, end_idx=768, hungarian_
         encoder_1, encoder_2, hungarian_batch_dim
     )
 
+    # Ensure we're comparing the same number of features
+    min_len = min(len(dec_col_ind), len(enc_col_ind))
+    dec_col_ind = dec_col_ind[:min_len]
+    enc_col_ind = enc_col_ind[:min_len]
+
     # Check identical alignments
     identical = enc_col_ind == dec_col_ind
 
     # Create dataframe for the scatter plot
     df = pd.DataFrame(
         {
-            "Decoder alignment": dec_similarities,
-            "Encoder alignment": enc_similarities,
+            "Decoder alignment": dec_similarities[:min_len],
+            "Encoder alignment": enc_similarities[:min_len],
             "Category": ["Equal" if i else "Different" for i in identical],
         }
     )
@@ -325,20 +230,26 @@ def plot_alignment_comparison(sae_1, sae_2, start_idx=0, end_idx=768, hungarian_
     # Add contour for "Equal" points
     fig.add_trace(
         go.Histogram2dContour(
-            x=df_equal["Decoder alignment"], y=df_equal["Encoder alignment"], opacity=0.7, **contour_params
+            x=df_equal["Decoder alignment"],
+            y=df_equal["Encoder alignment"],
+            opacity=0.7,
+            **contour_params,
         )
     )
 
     # Add contour for "Different" points
     fig.add_trace(
         go.Histogram2dContour(
-            x=df_different["Decoder alignment"], y=df_different["Encoder alignment"], opacity=0.7, **contour_params
+            x=df_different["Decoder alignment"],
+            y=df_different["Encoder alignment"],
+            opacity=0.7,
+            **contour_params,
         )
     )
 
     # Update layout
     fig.update_layout(
-        title=f"Alignment Comparison (features {start_idx}-{end_idx})",
+        title=title or f"Alignment Comparison (features {start_idx}-{end_idx if end_idx is not None else 'end'})",
         xaxis_title="Decoder alignment",
         yaxis_title="Encoder alignment",
         legend=dict(yanchor="top", y=0.99, xanchor="right", x=1.00, bgcolor="rgba(255, 255, 255, 0.8)"),
@@ -348,11 +259,52 @@ def plot_alignment_comparison(sae_1, sae_2, start_idx=0, end_idx=768, hungarian_
     return fig
 
 
-# # Features 0-768
-fig = plot_alignment_comparison(sae_42, sae_43, start_idx=0, end_idx=768)
-fig.show()
+def main() -> None:
+    """Main function to run the analysis."""
+    try:
+        # change the below
+        save_file_name = "alignment_comparison"
+        plot_title = "Gemma 2B SAE Alignment Comparison (Same model)"
+        model_1_checkpoint_dir = (
+            "custom_data_checkpoints/gemma-2-2B_blocks.12.hook_resid_post_3200_global-matryoshka-topk_40_0.0003_42_243"
+        )
+        model_2_checkpoint_dir = (
+            "custom_data_checkpoints/gemma-2-2B_blocks.12.hook_resid_post_3200_global-matryoshka-topk_40_0.0003_42_0"
+        )
 
-# Features 768-1536
-# fig = plot_alignment_comparison(sae_42, sae_43, start_idx=3072, end_idx=6144)
-# fig.show()
-# %%
+        # Set up device
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        # Example paths - replace with your actual checkpoint paths
+        checkpoint_dir_1 = model_1_checkpoint_dir
+        checkpoint_dir_2 = model_2_checkpoint_dir
+
+        # Load models
+        print(f"Loading model from {checkpoint_dir_1}")
+        sae_1, cfg_1 = load_sae_model(checkpoint_dir_1, str(device))
+        print(f"Loading model from {checkpoint_dir_2}")
+        sae_2, cfg_2 = load_sae_model(checkpoint_dir_2, str(device))
+
+        # Create comparison plot
+        fig = plot_alignment_comparison(sae_1, sae_2, title=plot_title)
+
+        # Create directories if they don't exist
+        os.makedirs("custom_data_html", exist_ok=True)
+        os.makedirs("custom_data_png", exist_ok=True)
+
+        # Save as HTML (interactive)
+        html_path = os.path.join("custom_data_html", f"{save_file_name}.html")
+        print(f"Saving HTML to {html_path}")
+        fig.write_html(html_path)
+
+        # Save as PNG (static)
+        png_path = os.path.join("custom_data_png", f"{save_file_name}.png")
+        print(f"Saving PNG to {png_path}")
+        fig.write_image(png_path)
+    except Exception as e:
+        print(f"Error in main: {str(e)}")
+        raise
+
+
+if __name__ == "__main__":
+    main()
