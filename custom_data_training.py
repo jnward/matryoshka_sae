@@ -1,7 +1,7 @@
 import copy
 import multiprocessing as mp
 import random
-from typing import Any
+from typing import List, Union
 
 import numpy as np
 import torch
@@ -13,7 +13,7 @@ from sae import BatchTopKSAE, GlobalBatchTopKMatryoshkaSAE
 from training import train_sae_group_seperate_wandb
 
 
-def set_seed(seed):
+def set_seed(seed: int) -> None:
     """Set random seed for reproducibility"""
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
@@ -26,9 +26,9 @@ def set_seed(seed):
 def train_custom_data(
     data: torch.Tensor,
     act_size: int,
-    dict_sizes: list,
-    topks: list,
-    group_sizes: list,
+    dict_sizes: List[int],
+    topks: List[int],
+    group_sizes: List[int],
     seed: int = 42,
     device: str = "cuda",
     wandb_project: str = "custom-data-matryoshka",
@@ -36,7 +36,10 @@ def train_custom_data(
     batch_size: int = 4096,
     lr: float = 3e-4,
     checkpoint_freq: int = 10000,
-):
+    n_signals: int = 10,
+    signal_strength: float = 1.0,
+    noise_level: float = 0.1,
+) -> None:
     """
     Train SAEs on custom data.
 
@@ -53,7 +56,58 @@ def train_custom_data(
         batch_size: Batch size
         lr: Learning rate
         checkpoint_freq: Frequency of checkpoints
+        n_signals: Number of signal components in synthetic data
+        signal_strength: Strength of signal components
+        noise_level: Level of noise in synthetic data
+
+    Raises:
+        ValueError: If input parameters are invalid
+        RuntimeError: If CUDA is requested but not available
     """
+    # Validate input data
+    if not isinstance(data, torch.Tensor):
+        raise TypeError("data must be a torch.Tensor")
+    if data.dim() != 2:
+        raise ValueError("data must be 2-dimensional (num_samples, act_size)")
+    if data.shape[1] != act_size:
+        raise ValueError(f"data shape {data.shape} does not match act_size {act_size}")
+    if data.shape[0] == 0:
+        raise ValueError("data must contain at least one sample")
+
+    # Validate lists
+    if not dict_sizes or not topks or not group_sizes:
+        raise ValueError("dict_sizes, topks, and group_sizes must not be empty")
+    if len(dict_sizes) != len(topks):
+        raise ValueError("dict_sizes and topks must have the same length")
+    if any(size <= 0 for size in dict_sizes):
+        raise ValueError("all dict_sizes must be positive")
+    if any(k <= 0 for k in topks):
+        raise ValueError("all topks must be positive")
+    if any(size <= 0 for size in group_sizes):
+        raise ValueError("all group_sizes must be positive")
+
+    # Validate other parameters
+    if act_size <= 0:
+        raise ValueError("act_size must be positive")
+    if num_tokens <= 0:
+        raise ValueError("num_tokens must be positive")
+    if batch_size <= 0:
+        raise ValueError("batch_size must be positive")
+    if lr <= 0:
+        raise ValueError("lr must be positive")
+    if checkpoint_freq <= 0:
+        raise ValueError("checkpoint_freq must be positive")
+    if n_signals <= 0:
+        raise ValueError("n_signals must be positive")
+    if signal_strength < 0:
+        raise ValueError("signal_strength must be non-negative")
+    if noise_level < 0:
+        raise ValueError("noise_level must be non-negative")
+
+    # Check CUDA availability
+    if device == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError("CUDA requested but not available")
+
     # Set up configuration
     cfg = get_custom_data_cfg()
     cfg["act_size"] = act_size
@@ -67,6 +121,9 @@ def train_custom_data(
     cfg["lr"] = lr
     cfg["checkpoint_freq"] = checkpoint_freq
     cfg["seed"] = seed
+    cfg["n_signals"] = n_signals
+    cfg["signal_strength"] = signal_strength
+    cfg["noise_level"] = noise_level
 
     # Set the seed for reproducibility
     set_seed(cfg["seed"])
@@ -76,7 +133,7 @@ def train_custom_data(
     data_loader = CustomDataLoader(data, cfg)
 
     # Initialize SAEs
-    saes: list[BatchTopKSAE | GlobalBatchTopKMatryoshkaSAE] = []
+    saes: List[Union[BatchTopKSAE, GlobalBatchTopKMatryoshkaSAE]] = []
     cfgs = []
 
     # Train the BatchTopK SAEs
@@ -101,7 +158,7 @@ def train_custom_data(
     cfg_copy["group_sizes"] = group_sizes
 
     cfg_copy = post_init_cfg(cfg_copy)
-    global_sae: Any = GlobalBatchTopKMatryoshkaSAE(cfg_copy)
+    global_sae = GlobalBatchTopKMatryoshkaSAE(cfg_copy)
     saes.append(global_sae)
     cfgs.append(cfg_copy)
 
@@ -136,4 +193,7 @@ if __name__ == "__main__":
         batch_size=4096,
         lr=3e-4,
         checkpoint_freq=10000,
+        n_signals=10,
+        signal_strength=1.0,
+        noise_level=0.1,
     )
